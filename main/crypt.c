@@ -30,11 +30,6 @@ THE SOFTWARE.
 #include "mbedtls/blowfish.h"
 #include "crypt.h"
 
-// Remove
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
-
 // Decrypt a hex-encoded, Blowfish ECB-encrypted string
 char *BlowfishDecryptString (
 	const char * const input,
@@ -51,29 +46,20 @@ char *BlowfishDecryptString (
 
 	assert(inputLen % 2 == 0);
 
-	printf("input len = %d   output len = %d\n", inputLen, outputLen);
-
 	output = calloc(outputLen+1, sizeof (*output));
 	/* hex decode */
 	for (size_t i = 0; i < outputLen; i++) {
 		memcpy (hex, &input[i*2], 2);	
 		output[i] = strtol (hex, NULL, 16);
-		printf ("size=%d i=%d Convert %s to %d \n", sizeof(size_t), i, hex, (int)output[i]);
-		vTaskDelay(250 / portTICK_PERIOD_MS);
 	}
 
 	decrypted = calloc(outputLen + 1, sizeof(*decrypted));
 
 	mbedtls_blowfish_init(&ctx);
-	if (mbedtls_blowfish_setkey(&ctx, (const unsigned char*)decrypt_key, strlen(decrypt_key) * 8))
-		printf("setkey failed!\n");
-	vTaskDelay(250 / portTICK_PERIOD_MS);
+	mbedtls_blowfish_setkey(&ctx, (const unsigned char*)decrypt_key, strlen(decrypt_key) * 8);
 
 	for (int i = 0; i < outputLen; i += MBEDTLS_BLOWFISH_BLOCKSIZE) {
-		if (mbedtls_blowfish_crypt_ecb(&ctx, MBEDTLS_BLOWFISH_DECRYPT, output + i, decrypted + i))
-			printf ("mbedtls_blowfish_crypt_ecb failed! i=%d", i);
-		vTaskDelay(250 / portTICK_PERIOD_MS);
-
+		mbedtls_blowfish_crypt_ecb(&ctx, MBEDTLS_BLOWFISH_DECRYPT, output + i, decrypted + i);
 	}
 
 	free(output);
@@ -111,13 +97,15 @@ char *BlowfishEncryptString (
 	// Convert to hex
 	hex_out = calloc (in_len*2+1, sizeof (*hex_out));
 	for (size_t i = 0; i < in_len; i++) {
-		snprintf ((char * restrict) &hex_out[i*2], 3, "%02x", in[i]);
+		snprintf ((char * restrict) &hex_out[i*2], 3, "%02x", out[i]);
 	}
 
 	// Cleanup
 	free(in);
 	free(out);
 	mbedtls_blowfish_free(&ctx);
+
+	printf("\n%s\n", hex_out);
 
 	return (char *) hex_out;
 }
