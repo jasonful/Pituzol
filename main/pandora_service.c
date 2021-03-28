@@ -64,8 +64,8 @@ get_non_auth_headers(
 	CHK(add_header(pandora, "Content-Type", "application/json"));
 
 	CHK(http_helper("https://www.pandora.com", HTTP_METHOD_HEAD, false,
-					  /*headers*/NULL, 0,
-					  /*body*/NULL, 0,
+					  NULL, 0,
+					  NULL, 0,
 					  filter_strings, 2, 
 					  &results, &results_len, NULL));
  
@@ -107,38 +107,27 @@ pandora_user_login(
 	esp_err_t err;
 	http_helper_result_t *results = NULL;
 	size_t results_len = 0;
-	const char* filter_strings[] = {"stat", "userAuthToken", "message"} ;
+	const char* filter_strings[] = {"\"stat\"", "\"userAuthToken\"", "\"message\""} ;
 	char* body = NULL;
-	const size_t body_max = 1024;
+	const size_t body_max = 1024; 
 	size_t body_len;
 	char *url;
-	const size_t url_max=100;
+	const size_t url_max=200;
 	size_t url_len;
 
 	url = malloc(url_max);
 	CHKB(url);
-	url_len = snprintf(url, url_max, "https://tuner.pandora.com/services/json/?method=auth.userLogin&partner_id=%d", pandora->partner_id);
+	url_len = snprintf(url, url_max, 
+						"https://tuner.pandora.com/services/json/?method=auth.userLogin&auth_token=%s&partner_id=%d",
+						pandora->partner_auth_token, pandora->partner_id);
 	CHKB(url_len < url_max);
 
 	body = malloc(body_max);
 	CHKB(body);
 	body_len = snprintf(body, body_max,
-		 "{\
-		    \"loginType\": \"user\",\
-		    \"username\": \"%s\",\
-		    \"password\": \"%s\",\
-		    \"partnerAuthToken\": \"%s\",\
-		    \"includePandoraOneInfo\":false,\
-		    \"includeAdAttributes\":false,\
-		    \"includeSubscriptionExpiration\":false,\
-		    \"includeStationArtUrl\":false,\
-		    \"returnStationList\":false,\
-		    \"returnGenreStations\":false,\
-		    \"syncTime\": %d\
-		}", 
-			 			username, password, pandora->partner_auth_token, synctime(pandora));
-
-	CHKB(body_len < body_max);
+				 "{ \"loginType\": \"user\", \"username\": \"%s\", \"password\": \"%s\", \"partnerAuthToken\": \"%s\", \"syncTime\": %d }", 
+				 username, password, pandora->partner_auth_token, synctime(pandora));
+ 	CHKB(body_len < body_max);
 
 	CHK(http_helper(url, 
 				  HTTP_METHOD_POST, 
@@ -156,6 +145,7 @@ pandora_user_login(
 
 	pandora->user_auth_token = strdup(results[1].result);
 	ESP_LOGI(TAG, "User auth token = %s", pandora->user_auth_token);
+	CHK(add_header(pandora, "X-AuthToken", pandora->user_auth_token));
 
 
 error:
@@ -172,7 +162,7 @@ pandora_partner_login(
 	esp_err_t err;
 	http_helper_result_t *results = NULL;
 	size_t results_len = 0;
-	const char* filter_strings[] = {"syncTime", "partnerAuthToken", "partnerId"} ;
+	const char* filter_strings[] = {"\"syncTime\"", "\"partnerAuthToken\"", "\"partnerId\""} ;
 	size_t body_len;
 	const char *cryptedTimestamp;
 	char *decryptedTimestamp = NULL;
@@ -193,17 +183,9 @@ pandora_partner_login(
 
 	assert(results[0].i_filter_string == 0);
 	cryptedTimestamp = results[0].result;
-printf("cryptedTimestamp = %s\n", cryptedTimestamp);
 	const time_t realTimestamp = time(NULL);
 
 	decryptedTimestamp = BlowfishDecryptString(cryptedTimestamp, &decryptedSize);
-
-
-printf("decryptedTimestamp = ");
-for (int i = 0; i < decryptedSize; i++) {
-	printf("%c", decryptedTimestamp[i]);
-}
-printf("\n");
 
 	if (decryptedTimestamp && decryptedSize > 4) {
 		/* skip four bytes garbage(?) at beginning */
@@ -336,8 +318,7 @@ pandora_get_playlist(
 	*urls_len = results_len;
 
 	for (i=0; i < results_len; i++) {
-		(*urls)[i] = results[i].result;
-		ESP_LOGI(TAG, "audioUrl: %s", results[i].result);
+		(*urls)[i] = strdup(results[i].result);
 	}
 
 error:
@@ -375,10 +356,10 @@ pandora_get_stations(
 	for (i=0; i < results_len; i++) {
 		switch (results[i].i_filter_string) {
 			case 0: 
-				pandora->stations[iStationId++  ].id   = results[i].result + strlen("ST:0:");
+				pandora->stations[iStationId++  ].id   = strdup(results[i].result + strlen("ST:0:"));
 				break;
 			case 1: 
-				pandora->stations[iStationName++].name = results[i].result;
+				pandora->stations[iStationName++].name = strdup(results[i].result);
 				break;
 			default:
 				CHKB(0);

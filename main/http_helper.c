@@ -76,7 +76,7 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt)
             //ESP_LOGI(TAG, "HTTP_EVENT_ON_CONNECTED");
             break;
         case HTTP_EVENT_HEADER_SENT:
-            ESP_LOGI(TAG, "HTTP_EVENT_HEADER_SENT");
+            //ESP_LOGI(TAG, "HTTP_EVENT_HEADER_SENT");
             break;
         case HTTP_EVENT_ON_HEADER:
             //ESP_LOGI(TAG, "HTTP_EVENT_ON_HEADER");
@@ -119,8 +119,7 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt)
 
         case HTTP_EVENT_ON_FINISH:
             u = (http_helper_user_data_t *)evt->user_data;
-            //ESP_LOGI(TAG, "HTTP_EVENT_ON_FINISH, len = %d", u->data_len);
-
+            //ESP_LOGI(TAG, "HTTP_EVENT_ON_FINISH");
             //printf("%.*s", u->data_len, u->data);
 
             if (u->cjson) {
@@ -182,6 +181,7 @@ http_helper(
     char *encrypted_body = NULL;
     
     ESP_LOGI(TAG, "Entering http_helper CONFIG_LOG_DEFAULT_LEVEL=%08x,  LOG_LOCAL_LEVEL=%08x", CONFIG_LOG_DEFAULT_LEVEL, LOG_LOCAL_LEVEL);
+    ESP_LOGI(TAG, "url= %s", url);
     if (headers) {
         while (i < headers_len) {
             ESP_LOGI(TAG, "Header: Key=%s Value=%s", headers[i], headers[i+1]);
@@ -190,7 +190,7 @@ http_helper(
     }
     for (i = 0; i < filter_string_count; i++)
     {
-        ESP_LOGI(TAG, "Filter string: %s", filter_strings[i]);
+        //ESP_LOGI(TAG, "Filter string: %s", filter_strings[i]);
     }
 
     http_helper_user_data_t user_data = {
@@ -212,7 +212,7 @@ http_helper(
         .event_handler = _http_event_handle,
         .user_data = &user_data,
         .skip_cert_common_name_check = true,
-        //.buffer_size_tx = DEFAULT_HTTP_BUF_SIZE * 2,
+        .buffer_size_tx = DEFAULT_HTTP_BUF_SIZE * 2,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
 

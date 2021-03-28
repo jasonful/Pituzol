@@ -56,6 +56,8 @@ test_pandora(
     esp_err_t err;
     const pandora_station_t *stations;
     size_t station_len;
+    *urls_len = 0;
+    *urls = NULL;
  
 
     pandora_handle_t pandora = pandora_init();
@@ -73,9 +75,9 @@ test_pandora(
         goto error;
     }
 
-    //CHK(pandora_get_stations(pandora, &stations, &station_len));
+    CHK(pandora_get_stations(pandora, &stations, &station_len));
 
-    //CHK(pandora_get_playlist(pandora, stations, urls, urls_len));
+    CHK(pandora_get_playlist(pandora, stations, urls, urls_len));
 
 error:
     return err;
@@ -166,15 +168,16 @@ void app_main(void)
     ESP_LOGI(TAG, "test_pandora returned %08x", err);
 
     CHK(err);
+    CHKB(audio_urls_len);
 
-    for (int i = 0; i < audio_urls_len; i++) {
-        ESP_LOGI(TAG, "[%d] = %s", i, audio_urls[i]);
+    if (audio_urls_len > 0) {
+        for (int i = 0; i < audio_urls_len; i++) {
+            ESP_LOGI(TAG, "[%d] = %s", i, audio_urls[i]);
+        }
+        audio_element_set_uri(http_stream_reader, audio_urls[0]);
+        // TODO: Free urls
     }
-    audio_element_set_uri(http_stream_reader, audio_urls[0]);
-    // TODO: Free urls
 
-    
- 
     ESP_LOGI(TAG, "[ 4 ] Set up  event listener");
     audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
     audio_event_iface_handle_t evt = audio_event_iface_init(&evt_cfg);
