@@ -105,8 +105,6 @@ char *BlowfishEncryptString (
 	free(out);
 	mbedtls_blowfish_free(&ctx);
 
-	printf("\n%s\n", hex_out);
-
 	return (char *) hex_out;
 }
 

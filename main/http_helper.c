@@ -11,7 +11,7 @@ static const char *TAG = "HTTP_HELPER";
 
 typedef struct http_helper_user_data_t {
     const char **filter_strings;
-    size_t filter_string_count;
+    size_t filter_string_len;
     http_helper_result_t **results;
     size_t *result_count;
     char *data;
@@ -59,7 +59,9 @@ add_result(
 }
 
 
-esp_err_t _http_event_handle(esp_http_client_event_t *evt)
+static esp_err_t 
+http_event_handler(
+    esp_http_client_event_t *evt)
 {
     http_helper_user_data_t *u;
     char *found_filter;
@@ -82,10 +84,9 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt)
             //ESP_LOGI(TAG, "HTTP_EVENT_ON_HEADER");
             //ESP_LOGI(TAG, "Key: %s", evt->header_key);
             //ESP_LOGI(TAG, "Value: %s", evt->header_value);
-            printf("%.*s", evt->data_len, (char*)evt->data);
             u = (http_helper_user_data_t *)evt->user_data;
 
-            for (i=0; i < u->filter_string_count; i++) {
+            for (i=0; i < u->filter_string_len; i++) {
 
                 // First, look in the Header key
                 if (0 == strcmp(u->filter_strings[i], evt->header_key)) {
@@ -106,27 +107,23 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt)
             break;
 
         case HTTP_EVENT_ON_DATA:
-            ESP_LOGI(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
-            if (!esp_http_client_is_chunked_response(evt->client)) {
-                printf("%.*s", evt->data_len, (char*)evt->data);
-            }
+            //ESP_LOGI(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
             u = (http_helper_user_data_t *)evt->user_data;
             u->data = realloc(u->data, u->data_len + evt->data_len);
             memcpy(u->data + u->data_len, (char*)evt->data, evt->data_len);
             u->data_len += evt->data_len;
-
             break;
 
         case HTTP_EVENT_ON_FINISH:
             u = (http_helper_user_data_t *)evt->user_data;
             //ESP_LOGI(TAG, "HTTP_EVENT_ON_FINISH");
-            //printf("%.*s", u->data_len, u->data);
+            printf("%.*s\n", u->data_len, u->data);
 
             if (u->cjson) {
                 *(u->cjson) = cJSON_Parse(u->data);
             }
  
-            for (i=0; i < u->filter_string_count; i++) {
+            for (i=0; i < u->filter_string_len; i++) {
                 // Look for all occurences of u->filter_string[i]
                 // and add a result for each, assuming JSON format.
                 start_search = u->data;
@@ -134,15 +131,18 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt)
                     found_filter = strnstr(start_search, u->filter_strings[i], u->data_len - (start_search - u->data));
                     if (found_filter) {
                         start = found_filter + strlen(u->filter_strings[i]);
+                        // Skip punctuation between key and value
                         while (*start == '"' || *start == ':' || *start == ' ') {
                             start++;
                         } 
                         end = start + 1;
-                        while (*end != '"' && 
+                        // Look for closing quote
+                        while (*end != '"' &&
+                               end[-1] != '\\' && 
                                end < u->data + u->data_len) {
                             end++;
                         }
-                        start_search = end;
+                        start_search = end; // start next iteration at end of this one
                         add_result(u, i, start, end);
                     }
                 } while (found_filter && 
@@ -165,13 +165,13 @@ esp_err_t
 http_helper(
     const char *url, 
     esp_http_client_method_t http_method,
-    bool encrypted,
+    bool encrypt_body,
     const char *headers[], 
     size_t headers_len,
     const char *body,
     size_t body_len,
     const char *filter_strings[],
-    size_t filter_string_count,
+    size_t filter_string_len,
     http_helper_result_t **results,
     size_t *result_count,
     cJSON **cjson)
@@ -180,22 +180,22 @@ http_helper(
     int i = 0;
     char *encrypted_body = NULL;
     
-    ESP_LOGI(TAG, "Entering http_helper CONFIG_LOG_DEFAULT_LEVEL=%08x,  LOG_LOCAL_LEVEL=%08x", CONFIG_LOG_DEFAULT_LEVEL, LOG_LOCAL_LEVEL);
+    //ESP_LOGI(TAG, "Entering http_helper CONFIG_LOG_DEFAULT_LEVEL=%08x,  LOG_LOCAL_LEVEL=%08x", CONFIG_LOG_DEFAULT_LEVEL, LOG_LOCAL_LEVEL);
     ESP_LOGI(TAG, "url= %s", url);
     if (headers) {
         while (i < headers_len) {
-            ESP_LOGI(TAG, "Header: Key=%s Value=%s", headers[i], headers[i+1]);
+            //ESP_LOGI(TAG, "Header: Key=%s Value=%s", headers[i], headers[i+1]);
             i += 2;
         }
     }
-    for (i = 0; i < filter_string_count; i++)
+    for (i = 0; i < filter_string_len; i++)
     {
         //ESP_LOGI(TAG, "Filter string: %s", filter_strings[i]);
     }
 
     http_helper_user_data_t user_data = {
         .filter_strings = filter_strings,
-        .filter_string_count = filter_string_count,
+        .filter_string_len = filter_string_len,
         .results = results,
         .result_count = result_count,
         .cjson = cjson,
@@ -209,7 +209,7 @@ http_helper(
     esp_http_client_config_t config = {
         .url = url,
         .method = http_method,
-        .event_handler = _http_event_handle,
+        .event_handler = http_event_handler,
         .user_data = &user_data,
         .skip_cert_common_name_check = true,
         .buffer_size_tx = DEFAULT_HTTP_BUF_SIZE * 2,
@@ -220,15 +220,13 @@ http_helper(
 
     if (headers)
     {
-        i = 0;
-        while (i < headers_len) {
+        for (i = 0; i < headers_len; i += 2) {
             esp_http_client_set_header(client, headers[i], headers[i+1]);
-            i += 2;
         }
     }
 
     if (body) {
-        if (encrypted) {
+        if (encrypt_body) {
             encrypted_body = BlowfishEncryptString(body);
             esp_http_client_set_post_field(client, encrypted_body, strlen(encrypted_body));
         } else {
@@ -262,5 +260,5 @@ http_helper_results_cleanup(
     for (int i = 0; i < result_count; i++) {
         free(results[i].result);
     }
-     free(results);
+    free(results);
 }
