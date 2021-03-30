@@ -18,7 +18,7 @@ esp_err_t
 http_helper(
     const char *url, 
     esp_http_client_method_t http_method,
-    bool encrypted,
+    bool encrypt_body,
     const char *headers[], 
     size_t headers_len,
     const char *body,

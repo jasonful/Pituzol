@@ -46,7 +46,7 @@
 static const char *TAG = "PANDORAS BOX";
 
 #define PANDORA_USE_DAC 0
-
+#define PANDORA_MP3_DECODER
 
 esp_err_t
 test_pandora(
@@ -54,11 +54,11 @@ test_pandora(
     size_t *urls_len)
 {
     esp_err_t err;
-    const pandora_station_t *stations;
-    size_t station_len;
-    *urls_len = 0;
-    *urls = NULL;
- 
+    pandora_station_t *stations = NULL;
+    size_t stations_len = 0;
+    pandora_track_t *tracks = NULL;
+    size_t tracks_len = 0;
+    int i_track = 0;
 
     pandora_handle_t pandora = pandora_init();
     if (!pandora)
@@ -68,18 +68,34 @@ test_pandora(
         goto error;
     }
 
-    err = pandora_login(pandora, "rojblake90210@gmail.com", "Joy2Music");
+    //err = pandora_login(pandora, "rojblake90210@gmail.com", "Joy2Music");
+    err = pandora_login(pandora, "jasonful@hotmail.com", "Pugsley1");
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "pandora_login failed");
         goto error;
     }
 
-    CHK(pandora_get_stations(pandora, &stations, &station_len));
+    CHK(pandora_get_stations(pandora, &stations, &stations_len));
 
-    CHK(pandora_get_playlist(pandora, stations, urls, urls_len));
+    for (int i=0; i < stations_len; i++) {
+        printf ("Station %d: name = %s token=%s\n", i, stations[i].name, stations[i].token);
+    }
+
+    CHK(pandora_get_tracks(pandora, stations, &tracks, &tracks_len));
+    for (int i = 0; i < tracks_len; i++) {
+        printf ("Track %d: song = %s artist = %s audio_url = %s\n", i, tracks[i].song, tracks[i].artist, tracks[i].audio_url);
+    }
+
+    *urls_len = 1;
+    *urls = calloc(*urls_len, sizeof(**urls));
+    **urls = strdup(tracks[i_track].audio_url);
+
+    CHK(pandora_playback_paused(pandora));
 
 error:
+    pandora_stations_cleanup(stations, stations_len);
+    pandora_tracks_cleanup(tracks, tracks_len);
     return err;
 }
 
@@ -101,10 +117,7 @@ void app_main(void)
 #endif
 
     audio_pipeline_handle_t pipeline;
-    audio_element_handle_t http_stream_reader, i2s_stream_writer, mp3_decoder;
-
-    //esp_log_level_set("*", ESP_LOG_WARN);
-    //esp_log_level_set(TAG, ESP_LOG_DEBUG);
+    audio_element_handle_t http_stream_reader, i2s_stream_writer;
 
  #if !PANDORA_USE_DAC
     ESP_LOGI(TAG, "[ 1 ] Start audio codec chip");
@@ -130,24 +143,36 @@ void app_main(void)
     i2s_cfg.type = AUDIO_STREAM_WRITER;
     i2s_stream_writer = i2s_stream_init(&i2s_cfg);
 
-#ifdef MP3_DECODER
+#ifdef PANDORA_MP3_DECODER
     ESP_LOGI(TAG, "[2.3] Create mp3 decoder to decode mp3 file");
     mp3_decoder_cfg_t mp3_cfg = DEFAULT_MP3_DECODER_CONFIG();
-    mp3_decoder = mp3_decoder_init(&mp3_cfg);
+    audio_element_handle_t mp3_decoder = mp3_decoder_init(&mp3_cfg);
 #endif
 
+#ifdef PANDORA_AAC_DECODER
     aac_decoder_cfg_t aac_dec_cfg  = DEFAULT_AAC_DECODER_CONFIG();
     audio_element_handle_t aac_decoder = aac_decoder_init(&aac_dec_cfg);
     audio_element_set_tag(aac_decoder, "m4a");
     //esp_audio_codec_lib_add(player, AUDIO_CODEC_TYPE_DECODER, aac_decoder_init(&aac_dec_cfg));
+#endif 
     
     ESP_LOGI(TAG, "[2.4] Register all elements to audio pipeline");
     audio_pipeline_register(pipeline, http_stream_reader, "http");
+#ifdef PANDORA_AAC_DECODER
     audio_pipeline_register(pipeline, aac_decoder,        "m4a");
+#endif
+#ifdef PANDORA_MP3_DECODER
+    audio_pipeline_register(pipeline, mp3_decoder,        "mp3");
+#endif
     audio_pipeline_register(pipeline, i2s_stream_writer,  "i2s");
 
-    ESP_LOGI(TAG, "[2.5] Link it together http_stream-->m4a_decoder-->i2s_stream-->[codec_chip]");
+    ESP_LOGI(TAG, "[2.5] Link it together http_stream-->decoder-->i2s_stream-->[codec_chip]");
+#ifdef PANDORA_AAC_DECODER
     const char *link_tag[3] = {"http", "m4a", "i2s"};
+#endif
+#ifdef PANDORA_MP3_DECODER
+    const char *link_tag[3] = {"http", "mp3", "i2s"};
+#endif
     audio_pipeline_link(pipeline, &link_tag[0], 3);
   
     ESP_LOGI(TAG, "[ 3 ] Start and wait for Wi-Fi network");
@@ -191,7 +216,7 @@ void app_main(void)
     ESP_LOGI(TAG, "[ 5 ] Start audio_pipeline");
     audio_pipeline_run(pipeline);
 
-    while (1) {
+    while (true) {
         audio_event_iface_msg_t msg;
         esp_err_t ret = audio_event_iface_listen(evt, &msg, portMAX_DELAY);
         if (ret != ESP_OK) {
@@ -199,7 +224,7 @@ void app_main(void)
             continue;
         }
 
-#ifdef MP3_DECODER
+#ifdef PANDORA_MP3_DECODER
         if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT
             && msg.source == (void *) mp3_decoder
             && msg.cmd == AEL_MSG_CMD_REPORT_MUSIC_INFO) {
@@ -215,6 +240,7 @@ void app_main(void)
         }
 #endif // MP3_DECODER
 
+#ifdef PANDORA_AAC_DECODER
         if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT
             && msg.source == (void *) aac_decoder
             && msg.cmd == AEL_MSG_CMD_REPORT_MUSIC_INFO) {
@@ -228,6 +254,7 @@ void app_main(void)
             i2s_stream_set_clk(i2s_stream_writer, music_info.sample_rates, music_info.bits, music_info.channels);
             continue;
         }
+#endif
 
         /* Stop when the last pipeline element (i2s_stream_writer in this case) receives stop event */
         if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT && msg.source == (void *) i2s_stream_writer
@@ -247,10 +274,12 @@ void app_main(void)
     /* Terminate the pipeline before removing the listener */
     audio_pipeline_unregister(pipeline, http_stream_reader);
     audio_pipeline_unregister(pipeline, i2s_stream_writer);
-#ifdef MP3_DECODER
+#ifdef PANDORA_MP3_DECODER
     audio_pipeline_unregister(pipeline, mp3_decoder);
 #endif
+#ifdef PANDORA_AAC_DECODER
     audio_pipeline_unregister(pipeline, aac_decoder);
+#endif
 
     audio_pipeline_remove_listener(pipeline);
 
@@ -268,7 +297,9 @@ void app_main(void)
 #ifdef MP3_DECODER
     audio_element_deinit(mp3_decoder);
 #endif
+#ifdef PANDORA_AAC_DECODER
     audio_element_deinit(aac_decoder);
+#endif
 
     esp_periph_set_destroy(set);
 error:;
