@@ -25,6 +25,17 @@ typedef struct pandora_t {
 	unsigned long       partner_id;
 } pandora_t;
 
+typedef struct pandora_helper_t {
+	pandora_handle_t pandora;
+	char *username;
+	char *password;
+	pandora_station_t *stations;
+    size_t stations_len;
+    pandora_track_t *tracks;
+    size_t tracks_len;
+    int i_next_track;
+} pandora_helper_t;
+
 
 pandora_handle_t pandora_init()
 {
@@ -222,6 +233,33 @@ error:
 
 
 
+static char *
+make_url(
+	pandora_handle_t pandora,
+	const char *method)
+{
+	int url_len;
+	const size_t url_max = 512;
+	char *url = malloc(url_max);
+
+	if (!(url && pandora->user_auth_token && pandora->partner_id && pandora->user_id)) {
+		return NULL;
+	}
+
+	url_len = snprintf(url, url_max, 
+						PANDORA_URL "method=%s&auth_token=%s&partner_id=%lu&user_id=%lu",
+						method, pandora->user_auth_token, pandora->partner_id, pandora->user_id);
+
+	if (url_len < url_max) {
+		url = realloc(url, url_len + 1);
+	} else {
+		ESP_LOGE(TAG, "make_url: string too long");
+		free(url);
+		url = NULL;
+	}
+  	return url;
+}
+
 
 esp_err_t pandora_get_tracks(
 	pandora_handle_t pandora,
@@ -232,26 +270,21 @@ esp_err_t pandora_get_tracks(
 	esp_err_t err;
 	http_helper_result_t *results = NULL;
 	size_t results_len = 0;
-	const char* filter_strings[] = {"\"songName\"", "\"artistName\"", "\"additionalAudioUrl\"", "\"message\""} ;
+	const char* filter_strings[] = {"\"songName\"", "\"artistName\"", "\"additionalAudioUrl\"", "\"message\"", "\"code\""} ;
 	char* body = NULL;
 	const size_t body_max = 512; 
 	size_t body_len;
 	char *url;
-	const size_t url_max=200;
-	size_t url_len;
 	int i, i_song= 0, i_artist = 0, i_url = 0;
 
-	url = malloc(url_max);
-	CHKB(url);
-	url_len = snprintf(url, url_max, 
-						PANDORA_URL "method=station.getPlaylist&auth_token=%s&partner_id=%lu&user_id=%lu",
-						pandora->user_auth_token, pandora->partner_id, pandora->user_id);
-	CHKB(url_len < url_max);
+	CHKB(url = make_url(pandora, "station.getPlaylist"));
+
+	CHKB(pandora->user_auth_token);
 
 	body = malloc(body_max);
 	CHKB(body);
 	body_len = snprintf(body, body_max,
-				"{\"userAuthToken\": \"%s\", \"additionalAudioUrl\": \"HTTP_128_MP3\", \"syncTime\": %d, \"stationToken\": \"%s\"}",
+				"{\"userAuthToken\": \"%s\", \"additionalAudioUrl\": \"HTTP_128_MP3\", \"syncTime\": %d, \"stationToken\": \"%s\", \"stationIsStarting\" : false}",
 				pandora->user_auth_token, synctime(pandora), station->token);
  	CHKB(body_len < body_max);
 
@@ -265,11 +298,16 @@ esp_err_t pandora_get_tracks(
 
 	if (0 == strcmp(results[0].result, "fail"))
 	{
-		ESP_LOGI(TAG, "login failed: %s", results[1].result);
+		if (1001 == atoi(results[2].result)) {
+			// INVALID_AUTH_TOKEN
+			free(pandora->user_auth_token);
+			pandora->user_auth_token = NULL;
+		}
+		ESP_LOGE(TAG, "get_tracks failed: %s %s", results[1].result, results[2].result);
 		CHKB(false);
 	}
 
-	*tracks_len = results_len / (countof(filter_strings) - 1); // subtract 1 for "message"
+	*tracks_len = results_len / (countof(filter_strings) - 2); // subtract 1 for "message" and "code"
 	*tracks = calloc(*tracks_len, sizeof(**tracks));
 
 	for (i=0; i < results_len; i++) {
@@ -313,12 +351,24 @@ pandora_get_stations(
 	http_helper_result_t *results = NULL;
 	size_t results_len = 0;
 	int i, iStationId= 0, iStationName = 0;
-	const char* filter_strings[] = {"\"id\"", "\"name\""};
-	const char* body = "{\"query\":\"{ collection(types: [ST]" /*, pagination: {limit: 3}*/ ") { items { id ... on Station { name }}}}\"}";
+	const char* filter_strings[] = {"\"stationId\"", "\"stationName\""};
+	char* body = NULL;
+	const size_t body_max = 512; 
+	size_t body_len;
+	char *url;
 
-	CHK(http_helper("https://www.pandora.com/api/v1/graphql/graphql", 
+	CHKB(url = make_url(pandora, "user.getStationList"));
+
+	body = malloc(body_max);
+	CHKB(body);
+	body_len = snprintf(body, body_max,
+				"{\"userAuthToken\": \"%s\", \"syncTime\": %d, \"includeStationArtUrl\": false, \"includeAdAttributes\": false, \"includeStationSeeds\": false, \"includeRecommendations\": false, \"includeExplanations\": false }",
+				pandora->user_auth_token, synctime(pandora));
+ 	CHKB(body_len < body_max);
+
+	CHK(http_helper(url, 
 					  HTTP_METHOD_POST, 
-					  false,
+					  true,
 					  pandora->headers, pandora->headers_len,
 					  body, strlen(body),
 					  filter_strings, countof(filter_strings), 
@@ -330,7 +380,7 @@ pandora_get_stations(
 	for (i=0; i < results_len; i++) {
 		switch (results[i].i_filter_string) {
 			case 0: 
-				(*stations)[iStationId++  ].token = strdup(results[i].result + strlen("ST:0:"));
+				(*stations)[iStationId++  ].token = strdup(results[i].result);
 				break;
 			case 1: 
 				(*stations)[iStationName++].name = strdup(results[i].result);
@@ -342,9 +392,12 @@ pandora_get_stations(
 	CHKB(iStationId == iStationName);
 
 error:
+	free(url);
+	free(body);
 	http_helper_results_cleanup(results, results_len);
 	return err;
 }
+
 
 
 esp_err_t
@@ -364,6 +417,86 @@ pandora_playback_paused(
 error:
 	return err;
 }
+
+
+
+// Pandora_helper object stores username, password, stations, tracks
+
+pandora_helper_handle_t
+pandora_helper_init (
+	const char *username,
+	const char *password)
+{
+	pandora_helper_t *helper = calloc(1, sizeof(*helper));
+
+	helper->pandora = pandora_init();
+
+	if (!helper->pandora) {
+		free(helper);
+		return NULL;
+	}
+
+	helper->username = strdup(username);
+	helper->password = strdup(password);
+    return helper;
+}
+	
+
+static esp_err_t
+get_tracks(pandora_helper_handle_t h)
+{	
+    esp_err_t err = ESP_OK;
+
+	// Cleanup old tracks
+   	pandora_tracks_cleanup(h->tracks, h->tracks_len);
+	h->tracks = NULL;
+	h->tracks_len = 0;
+	h->i_next_track = 0;
+
+	// Get new tracks
+    if (ESP_OK != pandora_get_tracks(h->pandora, h->stations, &h->tracks, &h->tracks_len)) {
+
+    	CHK(pandora_login(h->pandora, h->username, h->password));
+    	CHK(pandora_get_stations(h->pandora, &h->stations, &h->stations_len));
+    	CHK(pandora_get_tracks(h->pandora, h->stations, &h->tracks, &h->tracks_len));
+    }
+
+ error:
+ 	return err;
+}
+
+
+static bool
+url_is_valid(
+	char *url)
+{
+	return ESP_OK == http_helper(url, HTTP_METHOD_HEAD, false, NULL, 0, NULL, 0, NULL, 0, NULL, NULL, NULL);
+}
+
+
+esp_err_t
+pandora_helper_get_next_track(
+	pandora_helper_handle_t h,
+    char **url)
+{
+    esp_err_t err = ESP_OK;
+    char *u;
+
+    if (h->i_next_track < h->tracks_len 
+    	&& url_is_valid(u = h->tracks[h->i_next_track].audio_url)) {
+    		// Success
+    		h->i_next_track++;
+    		*url = strdup(u);
+    } else {
+    	// Need more tracks
+    	CHK(get_tracks(h));
+    	*url = strdup(h->tracks[h->i_next_track++].audio_url);
+    }
+   
+error:
+    return err;
+}
+
 
 
 //////// Cleanup functions:
@@ -403,6 +536,17 @@ pandora_tracks_cleanup(
 	free (tracks);
 }
 
+void
+pandora_helper_cleanup(
+	pandora_helper_handle_t h)
+{
+	free(h->username);
+	free(h->password);
+	pandora_cleanup(h->pandora);
+	pandora_stations_cleanup(h->stations, h->stations_len);
+	pandora_tracks_cleanup(h->tracks, h->tracks_len);
+	free(h);
+}
 
 void 
 pandora_cleanup(
@@ -417,4 +561,5 @@ pandora_cleanup(
 		free((void*)pandora->headers[i]);
 	}
 	free(pandora->partner_auth_token);
+	free (pandora);
 }

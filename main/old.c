@@ -40,6 +40,50 @@ error:
 }
 
 
+esp_err_t 
+pandora_get_stations_REST(
+	pandora_handle_t pandora, 
+	pandora_station_t **stations, 
+	size_t *stations_len)
+{
+	esp_err_t err;
+	http_helper_result_t *results = NULL;
+	size_t results_len = 0;
+	int i, iStationId= 0, iStationName = 0;
+	const char* filter_strings[] = {"\"id\"", "\"name\""};
+	const char* body = "{\"query\":\"{ collection(types: [ST]" /*, pagination: {limit: 3}*/ ") { items { id ... on Station { name }}}}\"}";
+
+	CHK(http_helper("https://www.pandora.com/api/v1/graphql/graphql", 
+					  HTTP_METHOD_POST, 
+					  false,
+					  pandora->headers, pandora->headers_len,
+					  body, strlen(body),
+					  filter_strings, countof(filter_strings), 
+					  &results, &results_len, NULL));
+
+	*stations_len = results_len / countof(filter_strings);
+	*stations = calloc(*stations_len, sizeof((*stations)[0]));
+
+	for (i=0; i < results_len; i++) {
+		switch (results[i].i_filter_string) {
+			case 0: 
+				(*stations)[iStationId++  ].token = strdup(results[i].result + strlen("ST:0:"));
+				break;
+			case 1: 
+				(*stations)[iStationName++].name = strdup(results[i].result);
+				break;
+			default:
+				CHKB(0);
+		} 
+	}
+	CHKB(iStationId == iStationName);
+
+error:
+	http_helper_results_cleanup(results, results_len);
+	return err;
+}
+
+
 esp_err_t
 pandora_get_playlist_REST(
 	pandora_handle_t pandora,
