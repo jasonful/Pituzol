@@ -68,8 +68,7 @@ test_pandora(
         goto error;
     }
 
-    //err = pandora_login(pandora, "rojblake90210@gmail.com", "Joy2Music");
-    err = pandora_login(pandora, "jasonful@hotmail.com", "Pugsley1");
+    err = pandora_login(pandora, CONFIG_PANDORA_USERNAME, CONFIG_PANDORA_PASSWORD);
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "pandora_login failed");
@@ -90,8 +89,6 @@ test_pandora(
     *urls_len = 1;
     *urls = calloc(*urls_len, sizeof(**urls));
     **urls = strdup(tracks[i_track].audio_url);
-
-    CHK(pandora_playback_paused(pandora));
 
 error:
     pandora_stations_cleanup(stations, stations_len);

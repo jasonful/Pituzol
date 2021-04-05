@@ -14,4 +14,16 @@ config WIFI_PASSWORD
 
 		Can be left blank if the network has no security set.
 
+config PANDORA_USERNAME
+	string "Pandora username"
+	default "enter your Pandora username here"
+	help
+		Pandora account username
+
+config PANDORA_PASSWORD
+	string "Pandora password"
+	default "enter your Pandora password here"
+	help
+		Pandora account password
+
 endmenu

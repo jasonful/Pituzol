@@ -55,7 +55,7 @@ add_result(
     results[count-1].result = r; 
     strncpy(r, start, length);
     r[length] = '\0';
-    ESP_LOGI(TAG, "Added result %s", r);
+    //ESP_LOGI(TAG, "Added result %s", r);
 }
 
 
