@@ -72,7 +72,7 @@ http_event_handler(
 
     switch(evt->event_id) {
         case HTTP_EVENT_ERROR:
-            ESP_LOGI(TAG, "HTTP_EVENT_ERROR");
+            ESP_LOGE(TAG, "HTTP_EVENT_ERROR");
             break;
         case HTTP_EVENT_ON_CONNECTED:
             //ESP_LOGI(TAG, "HTTP_EVENT_ON_CONNECTED");
@@ -117,8 +117,9 @@ http_event_handler(
         case HTTP_EVENT_ON_FINISH:
             u = (http_helper_user_data_t *)evt->user_data;
             //ESP_LOGI(TAG, "HTTP_EVENT_ON_FINISH");
-            printf("%.*s\n", u->data_len, u->data);
-
+            /*if (u->data_len < 1000) {
+                printf("%.*s\n", u->data_len, u->data);
+            }*/
             if (u->cjson) {
                 *(u->cjson) = cJSON_Parse(u->data);
             }
@@ -178,6 +179,7 @@ http_helper(
 {
     esp_err_t err = ESP_OK;
     int i = 0;
+    int http_code;
     char *encrypted_body = NULL;
     
     //ESP_LOGI(TAG, "Entering http_helper CONFIG_LOG_DEFAULT_LEVEL=%08x,  LOG_LOCAL_LEVEL=%08x", CONFIG_LOG_DEFAULT_LEVEL, LOG_LOCAL_LEVEL);
@@ -216,6 +218,9 @@ http_helper(
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
 
+    if (!client) {
+        ESP_LOGE(TAG, "esp_http_client_init failed");
+    }
     CHKB(client);
 
     if (headers)
@@ -239,6 +244,12 @@ http_helper(
 
     if (err == ESP_OK) {
         //ESP_LOGI(TAG, "Status = %d, content_length = %d", esp_http_client_get_status_code(client), esp_http_client_get_content_length(client));
+
+        // Fail if we got any HTTP status other than 200
+        http_code = esp_http_client_get_status_code(client);
+        if (http_code != 200) {
+            err = http_code;
+        }
     } else {
         ESP_LOGE(TAG, "perform failed %08x", err);
     }

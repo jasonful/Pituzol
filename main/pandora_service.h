@@ -1,3 +1,4 @@
+#pragma once
 
 typedef struct pandora_station_t {
 	char *token;
@@ -25,8 +26,13 @@ void pandora_stations_cleanup(pandora_station_t *stations, size_t stations_len);
 void pandora_tracks_cleanup(pandora_track_t *tracks, size_t tracks_len);
 void pandora_cleanup(pandora_handle_t pandora);
 
-// Helper APIs
+// Pandora Helper object
+// Acts as a cache.  
+// APIs can be called in any order, as long as init is first and cleanup is last.
+// Caller should not free any data returned.  Just call pandora_helper_cleanup() when totally done.
 pandora_helper_handle_t pandora_helper_init(const char *username, const char *password);
+esp_err_t pandora_helper_get_stations(pandora_helper_handle_t pandora, pandora_station_t **stations, size_t *stations_len);
+esp_err_t pandora_helper_set_station(pandora_helper_handle_t h,	int iStation);
 esp_err_t pandora_helper_get_next_track(pandora_helper_handle_t helper, char **url);
 void pandora_helper_cleanup(pandora_helper_handle_t helper);
 
