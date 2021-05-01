@@ -42,12 +42,14 @@
 
 #include "chk_error.h"
 #include "pandora_service.h"
+#include "gui.h"
 
 static const char *TAG = "PANDORAS BOX";
 
 #define PANDORA_USE_DAC 0
 #define PANDORA_MP3_DECODER
 
+#if 0
 esp_err_t
 test_pandora(
     char ***urls,
@@ -95,7 +97,42 @@ error:
     pandora_tracks_cleanup(tracks, tracks_len);
     return err;
 }
+#endif
 
+
+static void 
+setup_gui(
+    pandora_helper_handle_t pandora_helper)
+{
+    pandora_station_t *stations;
+    size_t stations_len = 0;
+    size_t options_len = 1;
+    size_t i;
+    char *options;
+
+    if (ESP_OK != pandora_helper_get_stations(pandora_helper, &stations, &stations_len))
+    {
+        return;
+    }
+
+    // Concatenate all the station names into on string, delimited by newlines
+    for (i=0; i < stations_len; i++) {
+        options_len += strlen(stations[i].name) + 1;
+    }
+
+    options = calloc(1, options_len);
+
+    for (i=0; i < stations_len; i++) {
+        strcat(options, stations[i].name);
+        if (i < stations_len - 1) {
+            strcat(options,"\n");
+        }
+    }
+
+    gui_init(options);
+
+    // Do not free options here because ownership gets transferred to a different thread.
+}
 
 
 void app_main(void)
@@ -115,6 +152,9 @@ void app_main(void)
 
     audio_pipeline_handle_t pipeline;
     audio_element_handle_t http_stream_reader, i2s_stream_writer;
+    pandora_helper_handle_t pandora_helper = NULL;
+    char *audio_url = NULL;
+
 
  #if !PANDORA_USE_DAC
     ESP_LOGI(TAG, "[ 1 ] Start audio codec chip");
@@ -184,6 +224,7 @@ void app_main(void)
     periph_wifi_wait_for_connected(wifi_handle, portMAX_DELAY);
     ESP_LOGI(TAG, "is Connected = %08x", periph_wifi_is_connected(wifi_handle));
 
+#if 0
     char **audio_urls = NULL;
     size_t audio_urls_len = 0;
     err = test_pandora(&audio_urls, &audio_urls_len);
@@ -199,6 +240,12 @@ void app_main(void)
         audio_element_set_uri(http_stream_reader, audio_urls[0]);
         // TODO: Free urls
     }
+#endif
+    pandora_helper = pandora_helper_init(CONFIG_PANDORA_USERNAME, CONFIG_PANDORA_PASSWORD);
+    CHK(pandora_helper_get_next_track(pandora_helper, &audio_url));
+    audio_element_set_uri(http_stream_reader, audio_url);
+    printf("audio_url = %s\n", audio_url);
+
 
     ESP_LOGI(TAG, "[ 4 ] Set up  event listener");
     audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
@@ -213,6 +260,8 @@ void app_main(void)
     ESP_LOGI(TAG, "[ 5 ] Start audio_pipeline");
     audio_pipeline_run(pipeline);
 
+    setup_gui(pandora_helper);
+
     while (true) {
         audio_event_iface_msg_t msg;
         esp_err_t ret = audio_event_iface_listen(evt, &msg, portMAX_DELAY);
@@ -220,6 +269,8 @@ void app_main(void)
             ESP_LOGE(TAG, "[ * ] Event interface error : %d", ret);
             continue;
         }
+
+        ESP_LOGI(TAG, "EVENT: Source type = %d  Source = %p  Cmd = %d", msg.source_type, msg.source, msg.cmd);
 
 #ifdef PANDORA_MP3_DECODER
         if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT
@@ -256,9 +307,25 @@ void app_main(void)
         /* Stop when the last pipeline element (i2s_stream_writer in this case) receives stop event */
         if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT && msg.source == (void *) i2s_stream_writer
             && msg.cmd == AEL_MSG_CMD_REPORT_STATUS
-            && (((int)msg.data == AEL_STATUS_STATE_STOPPED) || ((int)msg.data == AEL_STATUS_STATE_FINISHED))) {
-            ESP_LOGW(TAG, "[ * ] Stop event received");
-            break;
+            && (/*((int)msg.data == AEL_STATUS_STATE_STOPPED) || */ ((int)msg.data == AEL_STATUS_STATE_FINISHED))) {
+            ESP_LOGI(TAG, "[ * ] Finished event received");
+
+            if (ESP_OK == pandora_helper_get_next_track(pandora_helper, &audio_url)) {
+                // Restart the pipeline with the next url.
+                audio_element_set_uri(http_stream_reader, audio_url);
+            
+                audio_pipeline_stop(pipeline);
+                audio_pipeline_wait_for_stop(pipeline);
+                audio_pipeline_terminate(pipeline);
+                audio_pipeline_reset_ringbuffer(pipeline);
+                audio_pipeline_reset_elements(pipeline);
+                audio_pipeline_run(pipeline);
+                continue;            
+            } else {
+                // Something went wrong, can't get next track, just bail.
+                ESP_LOGE(TAG, "Could not get next track");
+                break;
+            }
         }
     }
  

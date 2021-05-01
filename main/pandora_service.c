@@ -34,6 +34,7 @@ typedef struct pandora_helper_t {
     pandora_track_t *tracks;
     size_t tracks_len;
     int i_next_track;
+    int i_current_station;
 } pandora_helper_t;
 
 
@@ -270,7 +271,7 @@ esp_err_t pandora_get_tracks(
 	esp_err_t err;
 	http_helper_result_t *results = NULL;
 	size_t results_len = 0;
-	const char* filter_strings[] = {"\"songName\"", "\"artistName\"", "\"additionalAudioUrl\"", "\"message\"", "\"code\""} ;
+	const char* filter_strings[] = {"\"songName\"", "\"artistName\"", "\"additionalAudioUrl\"", "\"stat\"", "\"message\"", "\"code\""} ;
 	char* body = NULL;
 	const size_t body_max = 512; 
 	size_t body_len;
@@ -296,18 +297,22 @@ esp_err_t pandora_get_tracks(
 				  filter_strings, countof(filter_strings), 
 				  &results, &results_len, NULL));
 
-	if (0 == strcmp(results[0].result, "fail"))
+	if (0 == strcmp(results[0].result, "fail") && 3 == results[0].i_filter_string /* stat */)
 	{
-		if (1001 == atoi(results[2].result)) {
+		err = atoi(results[2].result) /* code */;
+		if (1001 == err) {
 			// INVALID_AUTH_TOKEN
 			free(pandora->user_auth_token);
 			pandora->user_auth_token = NULL;
+			ESP_LOGE(TAG, "INVALID_AUTH_TOKEN");
+		} else if (1003 == err) {
+			ESP_LOGE(TAG, "LISTENER_NOT_AUTHORIZED");
 		}
 		ESP_LOGE(TAG, "get_tracks failed: %s %s", results[1].result, results[2].result);
-		CHKB(false);
+		CHK(err);
 	}
 
-	*tracks_len = results_len / (countof(filter_strings) - 2); // subtract 1 for "message" and "code"
+	*tracks_len = (results_len - 1/*stat*/) / (countof(filter_strings) - 3); // subtract 3 for "stat", "message" and "code"
 	*tracks = calloc(*tracks_len, sizeof(**tracks));
 
 	for (i=0; i < results_len; i++) {
@@ -322,7 +327,7 @@ esp_err_t pandora_get_tracks(
 				(*tracks)[i_url++].audio_url = strdup(results[i].result);
 				break;
 			default:
-				CHKB(0);
+				break;
 		} 
 	}
 	CHKB(i_song == i_artist  &&  i_song == i_url);
@@ -454,7 +459,8 @@ get_tracks(pandora_helper_handle_t h)
 	h->i_next_track = 0;
 
 	// Get new tracks
-    if (ESP_OK != pandora_get_tracks(h->pandora, h->stations, &h->tracks, &h->tracks_len)) {
+    if (ESP_OK != pandora_get_tracks(h->pandora, &h->stations[h->i_current_station], 
+    								 &h->tracks, &h->tracks_len)) {
 
     	CHK(pandora_login(h->pandora, h->username, h->password));
     	CHK(pandora_get_stations(h->pandora, &h->stations, &h->stations_len));
@@ -498,6 +504,47 @@ error:
 }
 
 
+esp_err_t 
+pandora_helper_get_stations(
+	pandora_helper_handle_t h,
+	pandora_station_t **stations, 
+	size_t *stations_len)
+{
+    esp_err_t err = ESP_OK;
+
+	if (h->stations_len == 0)
+	{
+		// Fill the cache
+		CHK(pandora_login(h->pandora, h->username, h->password));
+    	CHK(pandora_get_stations(h->pandora, &h->stations, &h->stations_len));	
+	}
+	
+	*stations = h->stations;
+	*stations_len = h->stations_len;	
+
+error:
+	return err;
+}
+
+
+esp_err_t
+pandora_helper_set_station(
+	pandora_helper_handle_t h,
+	int iStation)
+{
+    esp_err_t err = ESP_OK;
+
+	CHKB( iStation < h->stations_len);
+	
+	if (iStation != h->i_current_station) {
+		h->i_current_station = iStation;
+		// Dispose of old tracks and get new ones
+		get_tracks(h);
+	}
+
+error:
+	return err;
+}
 
 //////// Cleanup functions:
 
