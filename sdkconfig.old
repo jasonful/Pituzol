@@ -124,7 +124,7 @@ CONFIG_PARTITION_TABLE_MD5=y
 # Example Configuration
 #
 CONFIG_WIFI_SSID="Fuller"
-CONFIG_WIFI_PASSWORD="***REMOVED***"
+CONFIG_WIFI_PASSWORD="7818482906"
 # end of Example Configuration
 
 #
