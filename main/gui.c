@@ -28,6 +28,7 @@
 #endif
 
 #include "lvgl_helpers.h"
+#include "gui.h"
 
 #if 0
 #ifndef CONFIG_LV_TFT_DISPLAY_MONOCHROME
@@ -56,6 +57,7 @@
  **********************/
 static void lv_tick_task(void *arg);
 static void guiTask(void *pvParameter);
+static lv_obj_t * s_roller;
 
 /**********************
  *   APPLICATION MAIN
@@ -75,11 +77,44 @@ void gui_init(
 }
 
 
+void gui_button(
+    audio_event_iface_msg_t msg)
+{
+    uint16_t index = lv_roller_get_selected(s_roller);
+    uint16_t count = lv_roller_get_option_cnt(s_roller);
+    char string[128];
+                
+    if (msg.cmd == PERIPH_BUTTON_PRESSED) {
+        switch ((int)msg.data) {
+            case GPIO_NUM_36:
+                lv_roller_get_selected_str(s_roller, string, sizeof(string));
+                printf ("Activate %d %s\n", index, string);
+                break;
+
+            case GPIO_NUM_19:
+                if (0 == index) {
+                    index = count - 1;
+                } else {
+                    index--;
+                }
+                printf ("Up: Set selected %d \n", index);
+                lv_roller_set_selected(s_roller, index, LV_ANIM_ON);
+                break;
+
+            case GPIO_NUM_23:
+                index = (index + 1) % count;
+                printf ("Down: Set selected %d \n", index);
+                lv_roller_set_selected(s_roller, index, LV_ANIM_ON);
+                break;
+        }
+    }
+}
+
 
 static void 
 roller_event_handler(lv_obj_t * obj, lv_event_t event)
 {
-    printf("roller_event %d\n", event);
+    //printf("roller_event %d\n", event);
     if(event == LV_EVENT_VALUE_CHANGED) {
         char buf[64];
         lv_roller_get_selected_str(obj, buf, sizeof(buf));
@@ -109,7 +144,7 @@ input_device_read_callback(
 
     static int prev_states[NUM_KEYS];
     static int prev_key; // the last key returned
-    const uint32_t key_to_lvgl_key[NUM_KEYS] = {LV_KEY_LEFT, 0, LV_KEY_ENTER, LV_KEY_ESC, 0, LV_KEY_RIGHT};
+  /////////  const uint32_t key_to_lvgl_key[NUM_KEYS] = {LV_KEY_LEFT, 0, LV_KEY_ENTER, LV_KEY_ESC, 0, LV_KEY_RIGHT};
 
     // If we don't find a key that actually changed state,
     // just return the same key we returned last time.
@@ -121,6 +156,7 @@ input_device_read_callback(
         gpio_set_direction(key_to_gpio[i], GPIO_MODE_INPUT);/////
         int new_state = gpio_get_level(key_to_gpio[i]) ? LV_INDEV_STATE_REL : LV_INDEV_STATE_PR;
         if (new_state != prev_states[i]) {
+#if 0 /////////////////////
             printf("Key %d changed to %s\n", i+1, new_state == LV_INDEV_STATE_PR ? "Pressed" : "Released");
             // state changed, so can return this key
             data->key = key_to_lvgl_key[i];
@@ -128,8 +164,10 @@ input_device_read_callback(
             // Remember state
             prev_states[i] = new_state;
             prev_key = i;
+#endif
         }
     }
+
 
     return false; /*No buffering now so no more data read*/
 }
@@ -161,20 +199,23 @@ create_widgets(
     char* options)
 {
 
-    lv_obj_t * roller = lv_roller_create(/*parent*/lv_scr_act(), NULL);
+    s_roller = lv_roller_create(/*parent*/lv_scr_act(), NULL);
 
-    lv_roller_set_options(roller, options, LV_ROLLER_MODE_INFINITE);
+    lv_roller_set_options(s_roller, options, LV_ROLLER_MODE_INFINITE);
     //printf("\nReceived options:\n%s\n", options);
     free(options);
-    //lv_obj_add_style(roller, LV_CONT_PART_MAIN, &style_box);
-    //lv_obj_set_style_local_value_str(roller, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, "Roller");
-    //lv_roller_set_auto_fit(roller, false);
-    lv_roller_set_align(roller, LV_LABEL_ALIGN_LEFT);
-    lv_roller_set_visible_row_count(roller, 9);
-    lv_obj_set_width(roller, LV_HOR_RES_MAX);
-    lv_obj_set_event_cb(roller, roller_event_handler);
+    #if 0
+    lv_obj_add_style(s_roller, LV_CONT_PART_MAIN, &style_box);
+    lv_obj_set_style_local_value_str(s_roller, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, "Roller");
+    lv_roller_set_auto_fit(s_roller, false);
+    #endif
 
-    setup_input_device(roller);
+    lv_roller_set_align(s_roller, LV_LABEL_ALIGN_LEFT);
+    lv_roller_set_visible_row_count(s_roller, 9);
+    lv_obj_set_width(s_roller, LV_HOR_RES_MAX);
+    lv_obj_set_event_cb(s_roller, roller_event_handler);
+
+    setup_input_device(s_roller);
 }
 
 

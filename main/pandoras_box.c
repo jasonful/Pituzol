@@ -26,6 +26,7 @@
 
 #include "esp_peripherals.h"
 #include "periph_wifi.h"
+#include "periph_button.h"
 #include "board.h"
 
 #if __has_include("esp_idf_version.h")
@@ -212,6 +213,7 @@ void app_main(void)
 #endif
     audio_pipeline_link(pipeline, &link_tag[0], 3);
   
+    // WiFi
     ESP_LOGI(TAG, "[ 3 ] Start and wait for Wi-Fi network");
     esp_periph_config_t periph_cfg = DEFAULT_ESP_PERIPH_SET_CONFIG();
     esp_periph_set_handle_t set = esp_periph_set_init(&periph_cfg);
@@ -224,23 +226,14 @@ void app_main(void)
     periph_wifi_wait_for_connected(wifi_handle, portMAX_DELAY);
     ESP_LOGI(TAG, "is Connected = %08x", periph_wifi_is_connected(wifi_handle));
 
-#if 0
-    char **audio_urls = NULL;
-    size_t audio_urls_len = 0;
-    err = test_pandora(&audio_urls, &audio_urls_len);
-    ESP_LOGI(TAG, "test_pandora returned %08x", err);
+    // Buttons
+    periph_button_cfg_t btn_cfg = {
+        .gpio_mask = GPIO_SEL_36 | GPIO_SEL_13 | GPIO_SEL_19 | GPIO_SEL_23 | GPIO_SEL_18 | GPIO_SEL_5
+    };
+    esp_periph_handle_t button_handle = periph_button_init(&btn_cfg);
+    esp_periph_start(set, button_handle);
 
-    CHK(err);
-    CHKB(audio_urls_len);
-
-    if (audio_urls_len > 0) {
-        for (int i = 0; i < audio_urls_len; i++) {
-            ESP_LOGI(TAG, "[%d] = %s", i, audio_urls[i]);
-        }
-        audio_element_set_uri(http_stream_reader, audio_urls[0]);
-        // TODO: Free urls
-    }
-#endif
+    // Pituzol
     pandora_helper = pandora_helper_init(CONFIG_PANDORA_USERNAME, CONFIG_PANDORA_PASSWORD);
     CHK(pandora_helper_get_next_track(pandora_helper, &audio_url));
     audio_element_set_uri(http_stream_reader, audio_url);
@@ -326,6 +319,9 @@ void app_main(void)
                 ESP_LOGE(TAG, "Could not get next track");
                 break;
             }
+        }
+        if (msg.source_type == PERIPH_ID_BUTTON) {
+            gui_button(msg);
         }
     }
  
