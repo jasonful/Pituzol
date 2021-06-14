@@ -6,6 +6,7 @@ Pituzol is an ESP-IDF component to talk to the Pandora Radio service, combined w
 ## Compiling
 
 1. Install the ESP-IDF: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/
+    * If on Linux, depending on what you already have installed, you may need to `sudo apt install` git, cmake, ninja-build, python3-pip, python3-venv, python, cython 
 1. Install the ESP-ADF
     * `git clone--branch ai_thinker_branch --recursive https://github.com/herostrat/esp-adf.git`
     * Manually apply https://github.com/espressif/esp-adf/commit/ebd412874519881c64f6b502611e7cff68dbb5c9 
@@ -33,6 +34,8 @@ Pituzol is an ESP-IDF component to talk to the Pandora Radio service, combined w
 
 ## The code
 
-components/pandora_service/pandora_service.c is the code that talks to the Pandora server.  In pandora_service.h you will see there are actually two APIs: The functions that start with "pandora_" are a lower-level API that just talks immediately to the server and returns all its results.  The functions that start with "pandora_helper_" do things like cache results and credentials, and also will execute any previous steps necessary to fulfill your request.  For example, if you request a track, but are not logged in, it will do it for you.  
+components/pandora_service/pandora_service.c is the code that talks to the Pandora server.  The Pandora server protocol is not officially documented, but is unofficially documented at https://6xq.net/pandora-apidoc/.
+
+In pandora_service.h you will see there are actually two APIs: The functions that start with "pandora_" are a lower-level API that just talks immediately to the server and returns all its results.  The functions that start with "pandora_helper_" do things like cache results and credentials, and also will execute any previous steps necessary to fulfill your request.  For example, if you request a track, but are not logged in, it will do it for you.  
 
 You'll notice the code requests MP3s.  The AAC files Pandora returns by default are not compatible with the AAC decoder in the ESP-ADF.
