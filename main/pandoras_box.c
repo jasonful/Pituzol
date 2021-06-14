@@ -22,8 +22,6 @@
 #include "http_stream.h"
 #include "i2s_stream.h"
 #include "mp3_decoder.h"
-#include "aac_decoder.h"
-
 #include "esp_peripherals.h"
 #include "periph_wifi.h"
 #include "periph_button.h"
@@ -41,66 +39,22 @@
 #include "tcpip_adapter.h"
 #endif
 
+// https://github.com/tonyp7/esp32-wifi-manager.git
+#undef PITUZOL_USE_WIFI_MANAGER
+
 #include "chk_error.h"
 #include "pandora_service.h"
+#ifdef PITUZOL_GUI
 #include "gui.h"
+#endif
+#ifdef PITUZOL_USE_WIFI_MANAGER
+#include "wifi_manager.h"
+static bool s_wifi_connected;
+#endif
 
 static const char *TAG = "PANDORAS BOX";
 
-#define PANDORA_USE_DAC 0
-#define PANDORA_MP3_DECODER
-
-#if 0
-esp_err_t
-test_pandora(
-    char ***urls,
-    size_t *urls_len)
-{
-    esp_err_t err;
-    pandora_station_t *stations = NULL;
-    size_t stations_len = 0;
-    pandora_track_t *tracks = NULL;
-    size_t tracks_len = 0;
-    int i_track = 0;
-
-    pandora_handle_t pandora = pandora_init();
-    if (!pandora)
-    {
-        ESP_LOGE(TAG, "pandora_init failed");
-        err = ESP_FAIL;
-        goto error;
-    }
-
-    err = pandora_login(pandora, CONFIG_PANDORA_USERNAME, CONFIG_PANDORA_PASSWORD);
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "pandora_login failed");
-        goto error;
-    }
-
-    CHK(pandora_get_stations(pandora, &stations, &stations_len));
-
-    for (int i=0; i < stations_len; i++) {
-        printf ("Station %d: name = %s token=%s\n", i, stations[i].name, stations[i].token);
-    }
-
-    CHK(pandora_get_tracks(pandora, stations, &tracks, &tracks_len));
-    for (int i = 0; i < tracks_len; i++) {
-        printf ("Track %d: song = %s artist = %s audio_url = %s\n", i, tracks[i].song, tracks[i].artist, tracks[i].audio_url);
-    }
-
-    *urls_len = 1;
-    *urls = calloc(*urls_len, sizeof(**urls));
-    **urls = strdup(tracks[i_track].audio_url);
-
-error:
-    pandora_stations_cleanup(stations, stations_len);
-    pandora_tracks_cleanup(tracks, tracks_len);
-    return err;
-}
-#endif
-
-
+#ifdef PITUZOL_GUI
 static void 
 setup_gui(
     pandora_helper_handle_t pandora_helper)
@@ -134,7 +88,35 @@ setup_gui(
 
     // Do not free options here because ownership gets transferred to a different thread.
 }
+#endif
 
+#ifdef PITUZOL_USE_WIFI_MANAGER
+
+void wifi_manager_callback_connection_ok(
+    void *pvParameter)
+{
+	ip_event_got_ip_t* param = (ip_event_got_ip_t*)pvParameter;
+
+	/* transform IP to human readable string */
+	char str_ip[16];
+	esp_ip4addr_ntoa(&param->ip_info.ip, str_ip, IP4ADDR_STRLEN_MAX);
+
+    s_wifi_connected = true;
+
+	ESP_LOGI(TAG, "Wifi Connected. IP: %s", str_ip);
+}
+
+
+void wifi_manager_callback_connection_lost(
+    void *pvParameter)
+{
+    s_wifi_connected = false;
+
+    wifi_event_sta_disconnected_t* wifi_event_sta_disconnected = (wifi_event_sta_disconnected_t*)pvParameter;
+	ESP_LOGI(TAG, "WM_EVENT_STA_DISCONNECTED with Reason code: %d", wifi_event_sta_disconnected->reason);
+}
+
+#endif
 
 void app_main(void)
 {
@@ -145,10 +127,13 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_erase());
         err = nvs_flash_init();
     }
+
+#ifndef PITUZOL_USE_WIFI_MANAGER
 #if (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 1, 0))
     ESP_ERROR_CHECK(esp_netif_init());
 #else
     tcpip_adapter_init();
+#endif
 #endif
 
     audio_pipeline_handle_t pipeline;
@@ -157,7 +142,7 @@ void app_main(void)
     char *audio_url = NULL;
 
 
- #if !PANDORA_USE_DAC
+ #ifndef CONFIG_USE_BUILTIN_DAC
     ESP_LOGI(TAG, "[ 1 ] Start audio codec chip");
     audio_board_handle_t board_handle = audio_board_init();
     audio_hal_ctrl_codec(board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_DECODE, AUDIO_HAL_CTRL_START);
@@ -173,7 +158,7 @@ void app_main(void)
     http_stream_reader = http_stream_init(&http_cfg);
 
     ESP_LOGI(TAG, "[2.2] Create i2s stream to write data to codec chip");
-#if PANDORA_USE_DAC
+#ifdef CONFIG_USE_BUILTIN_DAC
     i2s_stream_cfg_t i2s_cfg = I2S_STREAM_INTERNAL_DAC_CFG_DEFAULT();
 #else
     i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
@@ -181,50 +166,44 @@ void app_main(void)
     i2s_cfg.type = AUDIO_STREAM_WRITER;
     i2s_stream_writer = i2s_stream_init(&i2s_cfg);
 
-#ifdef PANDORA_MP3_DECODER
     ESP_LOGI(TAG, "[2.3] Create mp3 decoder to decode mp3 file");
     mp3_decoder_cfg_t mp3_cfg = DEFAULT_MP3_DECODER_CONFIG();
     audio_element_handle_t mp3_decoder = mp3_decoder_init(&mp3_cfg);
-#endif
-
-#ifdef PANDORA_AAC_DECODER
-    aac_decoder_cfg_t aac_dec_cfg  = DEFAULT_AAC_DECODER_CONFIG();
-    audio_element_handle_t aac_decoder = aac_decoder_init(&aac_dec_cfg);
-    audio_element_set_tag(aac_decoder, "m4a");
-    //esp_audio_codec_lib_add(player, AUDIO_CODEC_TYPE_DECODER, aac_decoder_init(&aac_dec_cfg));
-#endif 
     
     ESP_LOGI(TAG, "[2.4] Register all elements to audio pipeline");
     audio_pipeline_register(pipeline, http_stream_reader, "http");
-#ifdef PANDORA_AAC_DECODER
-    audio_pipeline_register(pipeline, aac_decoder,        "m4a");
-#endif
-#ifdef PANDORA_MP3_DECODER
     audio_pipeline_register(pipeline, mp3_decoder,        "mp3");
-#endif
     audio_pipeline_register(pipeline, i2s_stream_writer,  "i2s");
 
     ESP_LOGI(TAG, "[2.5] Link it together http_stream-->decoder-->i2s_stream-->[codec_chip]");
-#ifdef PANDORA_AAC_DECODER
-    const char *link_tag[3] = {"http", "m4a", "i2s"};
-#endif
-#ifdef PANDORA_MP3_DECODER
     const char *link_tag[3] = {"http", "mp3", "i2s"};
-#endif
     audio_pipeline_link(pipeline, &link_tag[0], 3);
   
-    // WiFi
     ESP_LOGI(TAG, "[ 3 ] Start and wait for Wi-Fi network");
     esp_periph_config_t periph_cfg = DEFAULT_ESP_PERIPH_SET_CONFIG();
     esp_periph_set_handle_t set = esp_periph_set_init(&periph_cfg);
+
+    // WiFi
+    #ifdef PITUZOL_USE_WIFI_MANAGER
+	wifi_manager_start();
+
+	wifi_manager_set_callback(WM_EVENT_STA_GOT_IP, &wifi_manager_callback_connection_ok);
+    wifi_manager_set_callback(WM_EVENT_STA_DISCONNECTED, &wifi_manager_callback_connection_lost);
+    while (!s_wifi_connected) {
+        ESP_LOGI(TAG, "Waiting for Wifi");
+        vTaskDelay(250 / portTICK_PERIOD_MS);
+    }
+    #endif
+    
     periph_wifi_cfg_t wifi_cfg = {
-        .ssid = CONFIG_WIFI_SSID,
+        .ssid = CONFIG_WIFI_SSID, // unused if wifi_Manager is used
         .password = CONFIG_WIFI_PASSWORD,
     };
     esp_periph_handle_t wifi_handle = periph_wifi_init(&wifi_cfg);
     esp_periph_start(set, wifi_handle);
     periph_wifi_wait_for_connected(wifi_handle, portMAX_DELAY);
     ESP_LOGI(TAG, "is Connected = %08x", periph_wifi_is_connected(wifi_handle));
+    
 
     // Buttons
     periph_button_cfg_t btn_cfg = {
@@ -233,7 +212,7 @@ void app_main(void)
     esp_periph_handle_t button_handle = periph_button_init(&btn_cfg);
     esp_periph_start(set, button_handle);
 
-    // Pituzol
+    // Pandora Helper
     pandora_helper = pandora_helper_init(CONFIG_PANDORA_USERNAME, CONFIG_PANDORA_PASSWORD);
     CHK(pandora_helper_get_next_track(pandora_helper, &audio_url));
     audio_element_set_uri(http_stream_reader, audio_url);
@@ -253,7 +232,9 @@ void app_main(void)
     ESP_LOGI(TAG, "[ 5 ] Start audio_pipeline");
     audio_pipeline_run(pipeline);
 
+    #ifdef PITUZOL_GUI
     setup_gui(pandora_helper);
+    #endif
 
     while (true) {
         audio_event_iface_msg_t msg;
@@ -265,7 +246,6 @@ void app_main(void)
 
         ESP_LOGI(TAG, "EVENT: Source type = %d  Source = %p  Cmd = %d", msg.source_type, msg.source, msg.cmd);
 
-#ifdef PANDORA_MP3_DECODER
         if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT
             && msg.source == (void *) mp3_decoder
             && msg.cmd == AEL_MSG_CMD_REPORT_MUSIC_INFO) {
@@ -279,23 +259,6 @@ void app_main(void)
             i2s_stream_set_clk(i2s_stream_writer, music_info.sample_rates, music_info.bits, music_info.channels);
             continue;
         }
-#endif // MP3_DECODER
-
-#ifdef PANDORA_AAC_DECODER
-        if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT
-            && msg.source == (void *) aac_decoder
-            && msg.cmd == AEL_MSG_CMD_REPORT_MUSIC_INFO) {
-            audio_element_info_t music_info = {0};
-            audio_element_getinfo(aac_decoder, &music_info);
-
-            ESP_LOGI(TAG, "[ * ] Receive music info from aac decoder, sample_rates=%d, bits=%d, ch=%d",
-                     music_info.sample_rates, music_info.bits, music_info.channels);
-
-            audio_element_setinfo(i2s_stream_writer, &music_info);
-            i2s_stream_set_clk(i2s_stream_writer, music_info.sample_rates, music_info.bits, music_info.channels);
-            continue;
-        }
-#endif
 
         /* Stop when the last pipeline element (i2s_stream_writer in this case) receives stop event */
         if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT && msg.source == (void *) i2s_stream_writer
@@ -320,9 +283,11 @@ void app_main(void)
                 break;
             }
         }
+        #ifdef PITUZOL_GUI
         if (msg.source_type == PERIPH_ID_BUTTON) {
             gui_button(msg);
         }
+        #endif
     }
  
 
@@ -334,13 +299,7 @@ void app_main(void)
     /* Terminate the pipeline before removing the listener */
     audio_pipeline_unregister(pipeline, http_stream_reader);
     audio_pipeline_unregister(pipeline, i2s_stream_writer);
-#ifdef PANDORA_MP3_DECODER
     audio_pipeline_unregister(pipeline, mp3_decoder);
-#endif
-#ifdef PANDORA_AAC_DECODER
-    audio_pipeline_unregister(pipeline, aac_decoder);
-#endif
-
     audio_pipeline_remove_listener(pipeline);
 
     /* Stop all peripherals before removing the listener */
@@ -354,12 +313,7 @@ void app_main(void)
     audio_pipeline_deinit(pipeline);
     audio_element_deinit(http_stream_reader);
     audio_element_deinit(i2s_stream_writer);
-#ifdef MP3_DECODER
     audio_element_deinit(mp3_decoder);
-#endif
-#ifdef PANDORA_AAC_DECODER
-    audio_element_deinit(aac_decoder);
-#endif
 
     esp_periph_set_destroy(set);
 error:;

@@ -26,4 +26,11 @@ config PANDORA_PASSWORD
 	help
 		Pandora account password
 
+config USE_BUILTIN_DAC
+	bool "Use built-in DAC"
+	default y
+	help
+		Use ESP32's builtin DAC for audio output.  If disabled, you need to use an audio board such
+		as the LyraT or AI-Thinker A1S, and set the Audio HAL settings
+		
 endmenu

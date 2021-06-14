@@ -16,7 +16,7 @@ static const char *TAG = "PANDORA_SERVICE";
 #define BADADDR ((void*)0xcccccccc)
 
 typedef struct pandora_t {
-	const char *		headers[PANDORA_HEADERS_MAX] ;
+	const char *		headers[PANDORA_HEADERS_MAX];
 	size_t				headers_len;
 	int 				time_offset;
 	char *				user_auth_token;
@@ -142,7 +142,7 @@ pandora_partner_login(
 
 	if (decryptedTimestamp && decryptedSize > 4) {
 		/* skip four bytes garbage(?) at beginning */
-		const unsigned long timestamp = strtoul (decryptedTimestamp+4, NULL, 0);
+		const unsigned long timestamp = strtoul (decryptedTimestamp + 4, NULL, 0);
 		pandora->time_offset = (long int) realTimestamp - (long int) timestamp;
 	}
 

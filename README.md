@@ -1,31 +1,38 @@
-# Play mp3 file from HTTP
+# Pituzol
 
-The example plays a MP3 downloaded from HTTP. 
+Pituzol is an ESP-IDF component to talk to the Pandora Radio service, combined with a sample app showing how to play/stream the music on either a generic ESP32 device or an ESP32 audio board (LyraT or AI Thinker A1S).
 
-## Compatibility
 
-This example is will run on boards marked with green checkbox. Please remember to select the board in menuconfig as discussed is section *Usage* below.
+## Compiling
 
-| Board Name | Getting Started | Chip | Compatible |
-|-------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------------------:|:-----------------------------------------------------------------:|
-| ESP32-LyraT | [![alt text](../../../docs/_static/esp32-lyrat-v4.3-side-small.jpg "ESP32-LyraT")](https://docs.espressif.com/projects/esp-adf/en/latest/get-started/get-started-esp32-lyrat.html) | <img src="../../../docs/_static/ESP32.svg" height="85" alt="ESP32"> | ![alt text](../../../docs/_static/yes-button.png "Compatible") |
-| ESP32-LyraTD-MSC | [![alt text](../../../docs/_static/esp32-lyratd-msc-v2.2-small.jpg "ESP32-LyraTD-MSC")](https://docs.espressif.com/projects/esp-adf/en/latest/get-started/get-started-esp32-lyratd-msc.html) | <img src="../../../docs/_static/ESP32.svg" height="85" alt="ESP32"> | ![alt text](../../../docs/_static/yes-button.png "Compatible") |
-| ESP32-LyraT-Mini | [![alt text](../../../docs/_static/esp32-lyrat-mini-v1.2-small.jpg "ESP32-LyraT-Mini")](https://docs.espressif.com/projects/esp-adf/en/latest/get-started/get-started-esp32-lyrat-mini.html) | <img src="../../../docs/_static/ESP32.svg" height="85" alt="ESP32"> | ![alt text](../../../docs/_static/yes-button.png "Compatible") |
-| ESP32-Korvo-DU1906 | [![alt text](../../../docs/_static/esp32-korvo-du1906-v1.1-small.jpg "ESP32-Korvo-DU1906")](https://docs.espressif.com/projects/esp-adf/en/latest/get-started/get-started-esp32-korvo-du1906.html) | <img src="../../../docs/_static/ESP32.svg" height="85" alt="ESP32"> | ![alt text](../../../docs/_static/yes-button.png "Compatible") |
-| ESP32-S2-Kaluga-1 Kit | [![alt text](../../../docs/_static/esp32-s2-kaluga-1-kit-small.png "ESP32-S2-Kaluga-1 Kit")](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s2/hw-reference/esp32s2/user-guide-esp32-s2-kaluga-1-kit.html) | <img src="../../../docs/_static/ESP32-S2.svg" height="100" alt="ESP32-S2"> | ![alt text](../../../docs/_static/yes-button.png "Compatible") |
+1. Install the ESP-IDF: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/
+1. Install the ESP-ADF
+    * `git clone--branch ai_thinker_branch --recursive https://github.com/herostrat/esp-adf.git`
+    * Manually apply https://github.com/espressif/esp-adf/commit/ebd412874519881c64f6b502611e7cff68dbb5c9 
+    * Once herostrat is integrated into espressif's main (https://github.com/espressif/esp-adf/pull/554), you won't need this manual fix, and can just clone the official esp-adf.
+1. In a directory of your choice: `git clone https://github.com/jasonful/Pituzol.git`
+1. In that directory/Pituzol: `idf.py menuconfig`
+    * If using an audio board, specify it under `Audio HAL`.  Also check `Component config` > `ESP32-specific` > `Support for external SPI-connected RAM`
+    * If not using an audio board (just a generic ESP32), check `Example Configuration` > `Use built-in DAC`
+    * Set up the server connection under `Example Configuration`. Fill in `WiFi SSID`, `WiFi Password`, `Pandora username` and `Pandora password`
+1. `idf.py build`
 
-## Usage
+## Running
 
-Prepare the audio board:
+1. If using an audio board, connect earphones or speakers to the board.
+1. If using a bare ESP32, connect a speaker across GND and DAC_1 (GPIO 25), and another speaker across GND and DAC_2 (GPIO 26).  On an Adafruit Huzzah, these are A0 and A1.
+1. `idf.py -p yourusbport flash`
+    * On my Ubuntu system, the usb port was /dev/ttyUSB0
+1. `idf.py -p yourusbport monitor`
+1. After a few seconds, you should hear music.
 
-- Connect speakers or headphones to the board.
+## Limitations
 
-Configure the example:
+1. The sample app has no user interface; it just starts streaming your first Pandora station, which is the "QuickMix" or shuffle station.  
+1. Sometimes the music will stutter.  I suspect it is both downloading and playing on the same core, though I can't prove that.
 
-- Select compatible audio board in `menuconfig` > `Audio HAL`.
-- Set up the Wi-Fi connection by running `menuconfig` > `Example Configuration` and filling in `WiFi SSID` and `WiFi Password`.
+## The code
 
-Load and run the example:
+components/pandora_service/pandora_service.c is the code that talks to the Pandora server.  In pandora_service.h you will see there are actually two APIs: The functions that start with "pandora_" are a lower-level API that just talks immediately to the server and returns all its results.  The functions that start with "pandora_helper_" do things like cache results and credentials, and also will execute any previous steps necessary to fulfill your request.  For example, if you request a track, but are not logged in, it will do it for you.  
 
-- The audio board will first connect to the Wi-Fi.
-- Then the board will start playing automatically.
+You'll notice the code requests MP3s.  The AAC files Pandora returns by default are not compatible with the AAC decoder in the ESP-ADF.
